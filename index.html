@@ -1,0 +1,1421 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seat Allocation System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;600;700;900&display=swap');
+
+    body {
+      margin: 0;
+    }
+
+    .cyber-app {
+      font-family: 'Noto Sans JP', sans-serif;
+      background-color: #020617;
+      background-image: 
+        linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      min-height: 100vh;
+      color: #e2e8f0;
+      overflow-x: hidden;
+    }
+
+    .font-cyber {
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 150px;
+      background: linear-gradient(to bottom, transparent, rgba(0, 243, 255, 0.1), transparent);
+      animation: scan 4s linear infinite;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    @keyframes scan {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+
+    @keyframes popIn {
+      0% { transform: scale(0.5); opacity: 0; filter: blur(4px); }
+      70% { transform: scale(1.08); filter: blur(0); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .reveal-anim {
+      animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    .glitch-text {
+      text-shadow: 0 0 5px rgba(0, 243, 255, 0.8), -2px 0 red, 2px 0 blue;
+    }
+
+    /* ボス席（教卓前・教卓右前）用の虹色アニメーション */
+    @keyframes rainbowGlow {
+      0% { box-shadow: 0 0 24px #ff0055, inset 0 0 12px #ff0055; border-color: #ff0055; }
+      33% { box-shadow: 0 0 24px #00ffaa, inset 0 0 12px #00ffaa; border-color: #00ffaa; }
+      66% { box-shadow: 0 0 24px #5500ff, inset 0 0 12px #5500ff; border-color: #5500ff; }
+      100% { box-shadow: 0 0 24px #ff0055, inset 0 0 12px #ff0055; border-color: #ff0055; }
+    }
+
+    .boss-seat {
+      animation: rainbowGlow 1.2s linear infinite;
+      background: linear-gradient(135deg, rgba(255, 0, 85, 0.2), rgba(0, 243, 255, 0.2));
+    }
+
+    /* --- 1行目フォーカスモード（他の行を隠して最前列4人を大きく中央表示） --- */
+    #seat-screen.focus-mode {
+      overflow: visible !important;
+    }
+    #seat-screen.focus-mode #teacher-desk {
+      opacity: 0;
+      max-height: 0;
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-color: transparent;
+      overflow: hidden;
+      pointer-events: none;
+      transform: scaleY(0);
+    }
+    #seat-screen.focus-mode .seat-row:not(#seat-row-0) {
+      opacity: 0;
+      max-height: 0;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      pointer-events: none;
+      transform: scaleY(0);
+    }
+    #seat-screen.focus-mode #seat-grid {
+      gap: 0 !important;
+      padding: 12vh 2rem;
+    }
+    #seat-screen.focus-mode #seat-row-0 {
+      transform: scale(1.15);
+      transform-origin: center center;
+    }
+    @media (min-width: 640px) {
+      #seat-screen.focus-mode #seat-row-0 {
+        transform: scale(1.4);
+      }
+    }
+    @media (min-width: 1024px) {
+      #seat-screen.focus-mode #seat-row-0 {
+        transform: scale(1.65);
+      }
+    }
+    #seat-screen.focus-mode #seat-row-0 .dummy-seat-0 {
+      display: none !important;
+    }
+
+    /* --- 印刷用コンテナの非表示（通常時） --- */
+    #print-area {
+      display: none;
+    }
+
+    /* --- 印刷時の確実なスタイル上書き --- */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 0;
+      }
+      
+      body {
+        display: block !important;
+        background: #ffffff !important;
+        background-color: #ffffff !important;
+        background-image: none !important;
+        color: #000000 !important;
+        overflow: visible !important;
+      }
+      
+      .cyber-app {
+        background: #ffffff !important;
+        background-image: none !important;
+        min-height: auto !important;
+      }
+
+      .print-hide {
+        display: none !important;
+      }
+      
+      #print-area.print-show {
+        display: block !important;
+      }
+
+      .a4-container {
+        width: 100%;
+        height: 100vh;
+        padding: 12mm 18mm;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        page-break-after: avoid;
+        background-color: #ffffff !important;
+        box-shadow: none !important;
+        font-family: 'Noto Sans JP', sans-serif !important;
+      }
+    }
+    
+    /* 印刷用グリッドと座席のスタイル */
+    .seating-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      grid-template-rows: repeat(6, 1fr);
+      gap: 10px;
+      flex-grow: 1;
+      margin: 12px 0;
+    }
+
+    .print-seat {
+      position: relative;
+      border: 2px solid #374151;
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #111827;
+      background-color: #ffffff;
+      padding: 4px 6px;
+      text-align: center;
+    }
+
+    .print-seat-empty {
+      visibility: hidden;
+    }
+  </style>
+</head>
+<body class="cyber-app relative flex flex-col items-center print:bg-white print:text-black print:block">
+  <div class="scanline print-hide print:hidden"></div>
+
+  <!-- ヘッダー部 -->
+  <header class="w-full py-5 text-center border-b border-cyan-900/50 bg-slate-950/80 shadow-[0_4px_30px_rgba(0,243,255,0.1)] relative z-10 print-hide print:hidden">
+    <h1 class="font-cyber text-2xl md:text-4xl font-black tracking-[0.3em] text-cyan-400 glitch-text">
+      SEAT ALLOCATION SYSTEM
+    </h1>
+    <p class="text-cyan-600 text-xs mt-1.5 tracking-widest font-cyber">v3.0 // DELUXE STAGE &amp; PRINT PROTOCOL</p>
+  </header>
+
+  <main class="flex-1 w-full max-w-6xl p-4 md:p-6 relative z-10 flex flex-col items-center print-hide print:hidden">
+    
+    <!-- 入力画面 -->
+    <div id="input-screen" class="w-full max-w-2xl bg-slate-900/80 border border-slate-700 p-8 shadow-2xl relative rounded-sm mt-4">
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
+      <h2 class="text-xl font-bold text-cyan-300 mb-3 tracking-widest flex items-center gap-2">
+        <span class="w-2 h-2 bg-cyan-400 animate-pulse"></span>
+        TARGET DATA INPUT
+      </h2>
+      <p class="text-slate-400 text-sm mb-4">生徒の氏名とフリガナをカンマ( , )区切りで入力してください。（最大38席）</p>
+      
+      <textarea 
+        id="names-input"
+        class="w-full h-64 bg-slate-950 border border-cyan-900 text-cyan-100 p-4 font-mono focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400 transition-all rounded-sm resize-none"
+        placeholder="例：&#13;&#10;山田 太郎,やまだ たろう&#13;&#10;佐藤 花子,さとう はなこ&#13;&#10;鈴木 一郎,すずき いちろう"></textarea>
+      
+      <div class="mt-3 flex flex-wrap justify-between items-center gap-2">
+        <button id="load-sample-btn" type="button" class="text-xs text-slate-400 hover:text-cyan-300 underline underline-offset-4 tracking-wider transition-colors text-left">
+          + サンプルデータをロード（38名）
+        </button>
+        <span class="text-xs text-slate-400">※入力した上から順に出席番号（1番〜）になります</span>
+      </div>
+      
+      <div class="mt-6 flex flex-col sm:flex-row gap-4 justify-end">
+        <button id="order-btn" type="button" class="relative px-6 py-4 border-2 font-bold tracking-wider transition-all duration-300 border-amber-500 text-amber-400 hover:bg-amber-950/60 hover:shadow-[0_0_20px_rgba(245,158,11,0.4)] hover:-translate-y-1 active:translate-y-0 active:scale-95 rounded-sm">
+          <div class="absolute top-0 left-0 w-2 h-2 bg-amber-500"></div>
+          <div class="absolute bottom-0 right-0 w-2 h-2 bg-amber-500"></div>
+          <span>出席番号順で作成 (廊下側・前から)</span>
+        </button>
+        
+        <button id="start-btn" type="button" class="relative px-8 py-4 border-2 font-bold tracking-[0.15em] font-cyber transition-all duration-300 border-cyan-500 text-cyan-400 hover:bg-cyan-950 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] hover:-translate-y-1 active:translate-y-0 active:scale-95 uppercase rounded-sm">
+          <div class="absolute top-0 left-0 w-2 h-2 bg-cyan-500"></div>
+          <div class="absolute bottom-0 right-0 w-2 h-2 bg-cyan-500"></div>
+          <span>INITIALIZE (抽選開始)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 座席表示画面 -->
+    <div id="seat-screen" class="w-full flex flex-col items-center overflow-x-auto pb-28 hidden transition-all duration-700">
+      
+      <!-- 教卓 -->
+      <div id="teacher-desk" class="mb-8 w-64 text-center border-b-2 border-yellow-500/80 pb-3 relative transition-all duration-700 ease-in-out origin-top max-h-[100px]">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-1 bg-yellow-500/50 rounded-full"></div>
+        <span class="font-cyber tracking-[0.4em] text-yellow-500 font-bold text-sm">
+          TEACHER'S DESK
+        </span>
+      </div>
+
+      <!-- 座席グリッド -->
+      <div id="seat-grid" class="min-w-max flex flex-col gap-3 md:gap-4 items-center transition-all duration-700">
+        <!-- JSで動的に生成 -->
+      </div>
+    </div>
+  </main>
+
+  <!-- フローティング・コントロールパネル -->
+  <div id="control-panel" class="fixed bottom-0 left-0 w-full p-5 bg-gradient-to-t from-slate-950 via-slate-900/95 to-transparent flex flex-wrap justify-center gap-4 z-50 hidden print-hide print:hidden">
+    <!-- 廊下側の左右切り替えボタン（出席番号順モード時のみ表示） -->
+    <button id="toggle-side-btn" type="button" class="hidden relative px-6 py-4 border-2 font-bold tracking-wider transition-all duration-300 border-amber-500 text-amber-400 hover:bg-amber-950 hover:shadow-[0_0_20px_rgba(245,158,11,0.4)] hover:-translate-y-1 active:translate-y-0 active:scale-95 rounded-sm">
+      <div class="absolute top-0 left-0 w-2 h-2 bg-amber-500"></div>
+      <div class="absolute bottom-0 right-0 w-2 h-2 bg-amber-500"></div>
+      <span id="toggle-side-text">⇄ 廊下側：右列(4席)から</span>
+    </button>
+
+    <!-- 印刷ボタン -->
+    <button id="print-btn" type="button" class="hidden relative px-8 py-4 border-2 font-bold tracking-[0.2em] font-cyber transition-all duration-300 uppercase border-green-500 text-green-400 hover:bg-green-950 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:-translate-y-1 active:translate-y-0 active:scale-95 rounded-sm">
+      <div class="absolute top-0 left-0 w-2 h-2 bg-green-500"></div>
+      <div class="absolute bottom-0 right-0 w-2 h-2 bg-green-500"></div>
+      <span>PRINT SEATS</span>
+    </button>
+
+    <!-- 進行ボタン -->
+    <button id="next-btn" type="button" class="relative px-8 py-4 border-2 font-bold tracking-[0.15em] font-cyber transition-all duration-300 uppercase rounded-sm">
+      <div id="btn-dec-tl" class="absolute top-0 left-0 w-2 h-2"></div>
+      <div id="btn-dec-br" class="absolute bottom-0 right-0 w-2 h-2"></div>
+      <span id="next-btn-text"></span>
+    </button>
+  </div>
+
+  <!-- カスタムダイアログ（モーダル） -->
+  <div id="modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 hidden print-hide print:hidden">
+    <div class="bg-slate-900 border-2 border-cyan-500 p-8 max-w-md w-[90%] text-center shadow-[0_0_30px_rgba(0,243,255,0.4)] relative rounded-sm">
+      <div class="absolute top-0 left-0 w-2 h-2 bg-cyan-500"></div>
+      <div class="absolute bottom-0 right-0 w-2 h-2 bg-cyan-500"></div>
+      <p id="modal-text" class="text-cyan-100 font-bold mb-8 tracking-wider text-lg"></p>
+      <div class="flex justify-center gap-6">
+        <button id="modal-cancel-btn" type="button" class="px-6 py-2 bg-slate-800 text-slate-300 border border-slate-600 hover:bg-slate-700 hover:text-white transition-colors font-cyber hidden tracking-widest rounded-sm">CANCEL</button>
+        <button id="modal-ok-btn" type="button" class="px-8 py-2 bg-cyan-900/80 text-cyan-300 border border-cyan-400 hover:bg-cyan-800 hover:text-cyan-100 transition-colors font-cyber tracking-widest rounded-sm">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 印刷専用レイアウト ================= -->
+  <div id="print-area" class="print-show print:block">
+    <div class="a4-container">
+      <!-- ヘッダーエリア -->
+      <div class="text-center shrink-0">
+        <h1 class="text-2xl font-bold tracking-widest text-gray-900">座席表</h1>
+        <p class="text-gray-600 mt-0.5 text-xs font-medium">（教師視点 / 教卓から見下ろした配置）</p>
+      </div>
+
+      <!-- 座席を描画する領域 -->
+      <div class="seating-grid" id="print-seating-grid"></div>
+
+      <!-- 教卓エリア（画面下部） -->
+      <div class="flex flex-col items-center mt-auto shrink-0">
+        <div class="flex justify-center gap-16 text-gray-500 font-medium text-xs mb-1.5">
+          <span id="print-side-left">◀ 廊下側</span>
+          <span id="print-side-right">窓側 ▶</span>
+        </div>
+        <div class="w-64 border-2 border-gray-700 bg-gray-50 py-1.5 text-center rounded">
+          <span class="text-gray-900 font-bold tracking-[0.4em] text-base">教 卓</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ======================================================= -->
+
+  <script>
+    // ===================================================================
+    // 状態管理変数
+    // ===================================================================
+    let phase = 0;
+    let seats = [];             // 長さ38の配列（生徒オブジェクト {name, furigana, number} または null）
+    let revealed = {};          // 各座席インデックスの表示状態 (true, 'boss', 'roulette', 'empty')
+    let isAnimating = false;
+    let bossPattern1 = 'A';     // 教卓右前(idx: 2)の演出パターン ('A': 進む, 'B': 2人戻る)
+    let bossPattern2 = 'B';     // 教卓前(idx: 1)の演出パターン (bossPattern1と必ず逆)
+    let isNumberOrderMode = false;
+    let corridorSide = 'right'; // 生徒視点での廊下側 ('right' = 右端4席の列, 'left' = 左端5席の列)
+    let orderedNameList = [];
+
+    // 座席レイアウト定義（合計38席）
+    // ・最左列(col 0)と隣列(col 1): 2行目〜6行目 (各5席)
+    // ・中央4列(col 2〜5): 1行目〜6行目 (各6席) ※col 3が教卓まん前、col 4が教卓右前
+    // ・最右列(col 6): 2行目〜5行目 (4席)
+    const seatLayout = [
+      [null, null, 0,  1,  2,  3,  null], // 1行目 (最前列4席: 両端=0,3 / 教卓前=1 / 教卓右前=2)
+      [4,    5,    6,  7,  8,  9,  10  ], // 2行目 (7席)
+      [11,   12,   13, 14, 15, 16, 17  ], // 3行目 (7席)
+      [18,   19,   20, 21, 22, 23, 24  ], // 4行目 (7席)
+      [25,   26,   27, 28, 29, 30, 31  ], // 5行目 (7席)
+      [32,   33,   34, 35, 36, 37, null]  // 6行目 (最後列6席)
+    ];
+
+    // ===================================================================
+    // 大迫力・ゴージャス＆クリスマスベル仕様サウンドエンジン (Tone.js)
+    // 教室のざわめきの中でもしっかり聞こえるよう中高音域と音圧を強化
+    // ===================================================================
+    const sfx = {
+      ready: false,
+      brass: null,
+      bells: null,
+      shimmer: null,
+
+      async init() {
+        if (this.ready || typeof Tone === 'undefined') return;
+        try {
+          await Tone.start();
+
+          const limiter = new Tone.Limiter(-0.5).toDestination();
+          const comp = new Tone.Compressor({
+            threshold: -18,
+            ratio: 6,
+            attack: 0.005,
+            release: 0.15
+          }).connect(limiter);
+          const masterGain = new Tone.Gain(1.6).connect(comp);
+          const reverb = new Tone.Reverb({ decay: 2.2, wet: 0.28 }).connect(masterGain);
+
+          // ゴージャスなブラス（金管アンサンブル風）シンセ
+          this.brass = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 12,
+            oscillator: { type: 'fatsawtooth', count: 3, spread: 25 },
+            envelope: { attack: 0.015, decay: 0.25, sustain: 0.65, release: 0.8 }
+          }).connect(reverb);
+          this.brass.volume.value = 0;
+
+          // 教室でも突き抜けて響くクリスマス・スレイベル＆グロッケン風FMシンセ
+          this.bells = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 12,
+            harmonicity: 3.01,
+            modulationIndex: 12,
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.002, decay: 0.45, sustain: 0.05, release: 0.6 },
+            modulation: { type: 'square' },
+            modulationEnvelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.2 }
+          }).connect(reverb);
+          this.bells.volume.value = 2;
+
+          // シャンシャン鳴るジングルベルの金属音（ハイパスノイズ）
+          const hpFilter = new Tone.Filter(6500, 'highpass').connect(masterGain);
+          this.shimmer = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.002, decay: 0.09, sustain: 0, release: 0.05 }
+          }).connect(hpFilter);
+          this.shimmer.volume.value = -4;
+
+          this.ready = true;
+        } catch (e) {
+          console.warn('Audio init skipped:', e);
+        }
+      },
+
+      // ジングルベル風のシャンシャン音
+      jingle(count = 3, interval = 0.09) {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          for (let i = 0; i < count; i++) {
+            this.shimmer.triggerAttackRelease('32n', now + i * interval);
+            this.bells.triggerAttackRelease(['G6', 'D7'], '32n', now + i * interval, 0.45);
+          }
+        } catch (e) {}
+      },
+
+      // 抽選開始の華やかなオープニング・ファンファーレ
+      async playStart() {
+        await this.init();
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.jingle(5, 0.08);
+          this.brass.triggerAttackRelease(['C4', 'G4', 'C5'], '16n', now);
+          this.brass.triggerAttackRelease(['E4', 'B4', 'E5'], '16n', now + 0.13);
+          this.brass.triggerAttackRelease(['G4', 'D5', 'G5'], '16n', now + 0.26);
+          this.brass.triggerAttackRelease(['C4', 'E4', 'G4', 'C5', 'E5', 'G5'], '2n', now + 0.42);
+          this.bells.triggerAttackRelease(['C6', 'E6', 'G6', 'C7'], '4n', now + 0.42);
+        } catch (e) {}
+      },
+
+      // フェーズ進行時のキラキラチャイム
+      async playNext() {
+        await this.init();
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.jingle(2, 0.08);
+          this.bells.triggerAttackRelease(['E6', 'A6', 'C#7'], '8n', now);
+        } catch (e) {}
+      },
+
+      // ルーレット回転中のカウント音
+      playTick(step = 0) {
+        if (!this.ready) return;
+        try {
+          const notes = ['C6', 'D6', 'E6', 'G6', 'A6', 'C7'];
+          const note = notes[step % notes.length];
+          this.bells.triggerAttackRelease(note, '32n', Tone.now(), 0.7);
+          if (step % 2 === 0) {
+            this.shimmer.triggerAttackRelease('64n', Tone.now());
+          }
+        } catch (e) {}
+      },
+
+      // 最前列スライド時のカウントアップ音（1〜5人目にかけて音が高くなる）
+      playSlideStep(stepIndex) {
+        if (!this.ready) return;
+        try {
+          const scale = ['C5', 'E5', 'G5', 'B5', 'C6'];
+          const bellScale = ['C6', 'E6', 'G6', 'B6', 'C7'];
+          const idx = Math.min(stepIndex, scale.length - 1);
+          const now = Tone.now();
+          this.brass.triggerAttackRelease(scale[idx], '16n', now, 0.8);
+          this.bells.triggerAttackRelease(bellScale[idx], '8n', now, 0.95);
+          this.shimmer.triggerAttackRelease('32n', now);
+        } catch (e) {}
+      },
+
+      // 行確定時のゴージャスなメジャーコード
+      playRowWin() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.jingle(4, 0.07);
+          this.brass.triggerAttackRelease(['C4', 'G4', 'C5', 'E5', 'G5'], '4n', now);
+          this.bells.triggerAttackRelease(['G5', 'C6', 'E6', 'G6', 'C7'], '4n', now + 0.05);
+        } catch (e) {}
+      },
+
+      // ボス席で「一旦止まった…？」と思わせる重厚なストップ音
+      playFakeStop() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.brass.triggerAttackRelease(['D4', 'A4', 'D5', 'F#5'], '4n', now);
+          this.bells.triggerAttackRelease(['D6', 'F#6'], '8n', now);
+        } catch (e) {}
+      },
+
+      // 半分ズレて次の人がチラ見えする瞬間のサスペンス音
+      playSuspense() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.brass.triggerAttackRelease(['C#4', 'G4', 'B4', 'E5'], '2n', now, 0.9);
+          this.bells.triggerAttackRelease('G6', '16n', now);
+          this.bells.triggerAttackRelease('F#6', '16n', now + 0.18);
+          this.bells.triggerAttackRelease('G6', '8n', now + 0.36);
+        } catch (e) {}
+      },
+
+      // そのまま次の人に進む急展開サウンド
+      playAdvance() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.bells.triggerAttackRelease('G5', '16n', now);
+          this.bells.triggerAttackRelease('C6', '16n', now + 0.08);
+          this.bells.triggerAttackRelease('E6', '16n', now + 0.16);
+          this.brass.triggerAttackRelease(['G4', 'B4', 'D5', 'G5'], '8n', now + 0.12);
+        } catch (e) {}
+      },
+
+      // 2人前にシュッと巻き戻る急展開サウンド
+      playRewind() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          const notes = ['C7', 'A6', 'F6', 'D6', 'B5', 'G5'];
+          notes.forEach((n, i) => {
+            this.bells.triggerAttackRelease(n, '32n', now + i * 0.07);
+          });
+          this.brass.triggerAttackRelease(['G4', 'D5', 'G5'], '4n', now + 0.35);
+        } catch (e) {}
+      },
+
+      // 教卓前・教卓右前が決まった瞬間の特大グランプリ・ファンファーレ！
+      playBossWin() {
+        if (!this.ready) return;
+        try {
+          const now = Tone.now();
+          this.jingle(8, 0.07);
+          this.brass.triggerAttackRelease(['G3', 'G4', 'B4', 'D5'], '16n', now);
+          this.brass.triggerAttackRelease(['G3', 'G4', 'B4', 'D5'], '16n', now + 0.14);
+          this.brass.triggerAttackRelease(['G3', 'G4', 'B4', 'D5'], '16n', now + 0.28);
+          this.brass.triggerAttackRelease(['C4', 'G4', 'C5', 'E5', 'G5', 'C6'], '1n', now + 0.45);
+          this.bells.triggerAttackRelease(['C6', 'E6', 'G6', 'C7'], '2n', now + 0.45);
+          this.bells.triggerAttackRelease(['E6', 'G6', 'C7', 'E7'], '2n', now + 0.72);
+        } catch (e) {}
+      }
+    };
+
+    // ===================================================================
+    // ユーティリティ・モーダル制御
+    // ===================================================================
+    function escapeHTML(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function getStudentName(student) {
+      if (!student) return '';
+      return typeof student === 'string' ? student : student.name;
+    }
+
+    // まだ画面上で確定していない生徒一覧を取得
+    function getUnrevealedPool(excludeNumbers = []) {
+      const excludeSet = new Set(excludeNumbers);
+      const unrevealed = [];
+      for (let i = 0; i < seats.length; i++) {
+        const s = seats[i];
+        if (!s) continue;
+        const isAlreadyRevealed = (revealed[i] === true || revealed[i] === 'boss');
+        if (!isAlreadyRevealed && !excludeSet.has(s.number)) {
+          unrevealed.push(s);
+        }
+      }
+      return unrevealed;
+    }
+
+    // 配列をシャッフルして返す（非破壊）
+    function shuffledCopy(arr) {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    // カスタムモーダル表示
+    function showModal(msg, isConfirm = false, onConfirm = null) {
+      const modal = document.getElementById('modal');
+      const modalText = document.getElementById('modal-text');
+      const okBtn = document.getElementById('modal-ok-btn');
+      const cancelBtn = document.getElementById('modal-cancel-btn');
+      
+      modalText.innerText = msg;
+      modal.classList.remove('hidden');
+      
+      const newOkBtn = okBtn.cloneNode(true);
+      okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+      const newCancelBtn = cancelBtn.cloneNode(true);
+      cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+      
+      if (isConfirm) {
+        newCancelBtn.classList.remove('hidden');
+        newCancelBtn.addEventListener('click', () => {
+          modal.classList.add('hidden');
+        });
+        newOkBtn.addEventListener('click', () => {
+          modal.classList.add('hidden');
+          if (onConfirm) onConfirm();
+        });
+      } else {
+        newCancelBtn.classList.add('hidden');
+        newOkBtn.addEventListener('click', () => {
+          modal.classList.add('hidden');
+        });
+      }
+    }
+
+    // 画面表示切り替え
+    function updateView() {
+      const inputScreen = document.getElementById('input-screen');
+      const seatScreen = document.getElementById('seat-screen');
+      const controlPanel = document.getElementById('control-panel');
+      
+      if (phase === 0) {
+        inputScreen.classList.remove('hidden');
+        seatScreen.classList.add('hidden');
+        controlPanel.classList.add('hidden');
+      } else {
+        inputScreen.classList.add('hidden');
+        seatScreen.classList.remove('hidden');
+        controlPanel.classList.remove('hidden');
+      }
+    }
+
+    // ===================================================================
+    // 名簿パース＆初期化処理
+    // ===================================================================
+    document.getElementById('load-sample-btn').addEventListener('click', () => {
+      const lastNames = ['佐藤', '鈴木', '高橋', '田中', '伊藤', '渡辺', '山本', '中村', '小林', '加藤', '吉田', '山田', '佐々木', '山口', '松本', '井上', '木村', '林', '斎藤', '清水'];
+      const lastKana  = ['さとう', 'すずき', 'たかはし', 'たなか', 'いとう', 'わたなべ', 'やまもと', 'なかむら', 'こばやし', 'かとう', 'よしだ', 'やまだ', 'ささき', 'やまぐち', 'まつもと', 'いのうえ', 'きむら', 'はやし', 'さいとう', 'しみず'];
+      const firstNames = ['蓮', '陽葵', '湊', '凛', '新', '紬', '蒼', '結愛', '律', '杏', '樹', '美月', '大翔', '心春', '悠真', '莉子', '颯太', 'さくら', '朝陽', '結菜'];
+      const firstKana  = ['れん', 'ひまり', 'みなと', 'りん', 'あらた', 'つむぎ', 'あおい', 'ゆあ', 'りつ', 'あん', 'いつき', 'みづき', 'ひろと', 'こはる', 'ゆうま', 'りこ', 'そうた', 'さくら', 'あさひ', 'ゆいな'];
+
+      const samples = Array.from({ length: 38 }, (_, i) => {
+        const ln = lastNames[i % lastNames.length];
+        const lk = lastKana[i % lastKana.length];
+        const fn = firstNames[(i * 3 + Math.floor(i / 20)) % firstNames.length];
+        const fk = firstKana[(i * 3 + Math.floor(i / 20)) % firstKana.length];
+        return `${ln} ${fn},${lk} ${fk}`;
+      });
+      document.getElementById('names-input').value = samples.join('\n');
+    });
+
+    function parseInputNames() {
+      const text = document.getElementById('names-input').value;
+      let nameList = text.split('\n')
+        .map(n => n.trim())
+        .filter(n => n && n !== '---' && !n.startsWith('例：'))
+        .map((n, index) => {
+          const parts = n.split(/[,，]/);
+          return {
+            name: parts[0].trim(),
+            furigana: parts.length > 1 ? parts.slice(1).join(' ').trim() : '',
+            number: index + 1
+          };
+        })
+        .filter(item => item.name.length > 0);
+
+      if (nameList.length > 38) {
+        nameList = nameList.slice(0, 38);
+      }
+      return nameList;
+    }
+
+    // 印刷用ラベル（廊下側 / 窓側）の更新
+    function syncPrintSideLabels() {
+      const leftLabel = document.getElementById('print-side-left');
+      const rightLabel = document.getElementById('print-side-right');
+      if (!leftLabel || !rightLabel) return;
+      // 教師視点（180度反転）では、生徒視点の右列が左側に来る
+      if (corridorSide === 'right') {
+        leftLabel.innerText = '◀ 廊下側';
+        rightLabel.innerText = '窓側 ▶';
+      } else {
+        leftLabel.innerText = '◀ 窓側';
+        rightLabel.innerText = '廊下側 ▶';
+      }
+    }
+
+    // 廊下側の前から縦に出席番号順で配置する処理
+    function applyNumberOrder() {
+      seats = new Array(38).fill(null);
+      revealed = {};
+
+      // 生徒視点（教卓が上）で右列(4席の列)から並べるか、左列(5席の列)から並べるか
+      const cols = corridorSide === 'right'
+        ? [6, 5, 4, 3, 2, 1, 0]
+        : [0, 1, 2, 3, 4, 5, 6];
+
+      const seatOrder = [];
+      cols.forEach(col => {
+        for (let row = 0; row < seatLayout.length; row++) {
+          const seatIdx = seatLayout[row][col];
+          if (seatIdx !== null) {
+            seatOrder.push(seatIdx);
+          }
+        }
+      });
+
+      seatOrder.forEach((seatIdx, i) => {
+        if (i < orderedNameList.length) {
+          seats[seatIdx] = orderedNameList[i];
+          revealed[seatIdx] = true;
+        } else {
+          seats[seatIdx] = null;
+          revealed[seatIdx] = 'empty';
+        }
+      });
+
+      syncPrintSideLabels();
+    }
+
+    // 「出席番号順で作成」ボタン
+    document.getElementById('order-btn').addEventListener('click', async () => {
+      const nameList = parseInputNames();
+      if (nameList.length === 0) {
+        showModal('生徒の氏名を入力してください。');
+        return;
+      }
+
+      isNumberOrderMode = true;
+      orderedNameList = nameList;
+      document.getElementById('seat-screen').classList.remove('focus-mode');
+
+      const toggleText = document.getElementById('toggle-side-text');
+      toggleText.innerText = corridorSide === 'right'
+        ? '⇄ 廊下側：右列(4席)から'
+        : '⇄ 廊下側：左列(5席)から';
+
+      applyNumberOrder();
+      phase = 9; // 即座に全席表示＆印刷可能状態にする
+
+      await sfx.playNext();
+      generateSeats();
+      updateView();
+      updateButtonText();
+    });
+
+    // 「INITIALIZE (抽選開始)」ボタン
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      let nameList = parseInputNames();
+      if (nameList.length === 0) {
+        showModal('生徒の氏名を入力してください。');
+        return;
+      }
+
+      isNumberOrderMode = false;
+      corridorSide = 'right';
+      syncPrintSideLabels();
+      document.getElementById('seat-screen').classList.remove('focus-mode');
+
+      const studentCount = nameList.length;
+
+      // Fisher-Yates シャッフル
+      nameList = shuffledCopy(nameList);
+
+      // 教卓右前(bossPattern1) と 教卓前(bossPattern2) の展開を必ず逆にする
+      bossPattern1 = Math.random() < 0.5 ? 'A' : 'B';
+      bossPattern2 = bossPattern1 === 'A' ? 'B' : 'A';
+
+      // 前から生徒を詰め、余った後ろの席は空席(null)にして最初からルーレット対象外にする
+      seats = [];
+      revealed = {};
+      for (let i = 0; i < 38; i++) {
+        if (i < studentCount) {
+          seats.push(nameList[i]);
+        } else {
+          seats.push(null);
+          revealed[i] = 'empty';
+        }
+      }
+
+      phase = 1;
+      skipEmptyPhasesIfNeeded();
+
+      await sfx.playStart();
+      generateSeats();
+      updateView();
+      updateButtonText();
+    });
+
+    // 該当フェーズの対象席がすべて空席（少人数時など）の場合は自動で次の有効フェーズへ進める
+    function getPhaseSeatIndices(p) {
+      switch (p) {
+        case 1: return [25, 26, 27, 28, 29, 30, 31]; // 第5行
+        case 2: return [18, 19, 20, 21, 22, 23, 24]; // 第4行
+        case 3: return [11, 12, 13, 14, 15, 16, 17]; // 第3行
+        case 4: return [4, 5, 6, 7, 8, 9, 10];       // 第2行
+        case 5: return [0, 3];                       // 第1行 両端
+        case 6: return [2];                          // 第1行 教卓右前
+        case 7: return [1];                          // 第1行 教卓前
+        case 8: return [32, 33, 34, 35, 36, 37];     // 第6行 (最後列)
+        default: return [];
+      }
+    }
+
+    function skipEmptyPhasesIfNeeded() {
+      while (phase >= 1 && phase <= 8) {
+        const activeIndices = getPhaseSeatIndices(phase).filter(idx => seats[idx] !== null);
+        if (activeIndices.length > 0) break;
+        phase++;
+      }
+      if (phase >= 8 && getPhaseSeatIndices(8).filter(idx => seats[idx] !== null).length === 0 && phase === 9) {
+        document.getElementById('seat-screen').classList.remove('focus-mode');
+      }
+    }
+
+    // ===================================================================
+    // 座席DOMの構築・描画
+    // ===================================================================
+    function generateSeats() {
+      const grid = document.getElementById('seat-grid');
+      grid.innerHTML = '';
+
+      seatLayout.forEach((row, rowIndex) => {
+        const rowDiv = document.createElement('div');
+        rowDiv.id = `seat-row-${rowIndex}`;
+        rowDiv.className = 'seat-row flex gap-3 md:gap-4 transition-all duration-700 ease-in-out max-h-[200px]';
+
+        row.forEach(seatIdx => {
+          const seatDiv = document.createElement('div');
+          if (seatIdx !== null) {
+            seatDiv.id = `seat-${seatIdx}`;
+            rowDiv.appendChild(seatDiv);
+            updateSeatDOM(seatIdx, seatDiv);
+          } else {
+            const extraCls = rowIndex === 0 ? 'dummy-seat-0' : '';
+            seatDiv.className = `w-[90px] h-[70px] md:w-[125px] md:h-[80px] invisible ${extraCls}`;
+            rowDiv.appendChild(seatDiv);
+          }
+        });
+
+        grid.appendChild(rowDiv);
+      });
+    }
+
+    function updateSeatDOM(idx, el, tempStudent = null) {
+      if (!el) return;
+      const state = revealed[idx];
+
+      if (state === 'empty' || seats[idx] === null) {
+        // 人数不足による空席
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] flex items-center justify-center border border-dashed border-slate-800 bg-slate-900/20 opacity-35 rounded-sm';
+        el.innerHTML = '<span class="text-[10px] font-cyber tracking-widest text-slate-600">EMPTY</span>';
+      } else if (state === true) {
+        // 通常確定状態
+        const student = seats[idx];
+        const name = escapeHTML(getStudentName(student));
+        const numBadge = (isNumberOrderMode && student)
+          ? `<span class="absolute top-0.5 left-2 text-[11px] font-mono font-bold text-amber-300">${student.number}</span>`
+          : '';
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] flex items-center justify-center border transition-all duration-500 border-cyan-400 bg-cyan-900/40 shadow-[0_0_15px_rgba(0,243,255,0.3)] px-2 text-center rounded-sm';
+        el.innerHTML = `
+          <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-cyan-300"></div>
+          <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-cyan-300"></div>
+          ${numBadge}
+          <span class="font-bold text-sm md:text-base text-white tracking-wider leading-tight reveal-anim">${name}</span>
+        `;
+      } else if (state === 'boss') {
+        // 教卓前・教卓右前の特別確定状態
+        const student = seats[idx];
+        const name = escapeHTML(getStudentName(student));
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] flex items-center justify-center border-2 boss-seat transition-all duration-500 px-2 text-center z-20 rounded-sm';
+        el.innerHTML = `
+          <div class="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-white"></div>
+          <div class="absolute bottom-0 right-0 w-2.5 h-2.5 border-b-2 border-r-2 border-white"></div>
+          <span class="font-black text-sm md:text-lg text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.9)] leading-tight reveal-anim">${name}</span>
+        `;
+      } else if (state === 'roulette') {
+        // 通常行の高速ルーレット回転中
+        const name = escapeHTML(getStudentName(tempStudent));
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] flex items-center justify-center border border-yellow-500 bg-yellow-900/30 shadow-[0_0_15px_rgba(234,179,8,0.4)] px-2 text-center rounded-sm';
+        el.innerHTML = `
+          <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-yellow-400"></div>
+          <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-yellow-400"></div>
+          <span class="font-bold text-xs md:text-sm text-yellow-200 tracking-wider blur-[0.3px] leading-tight">${name}</span>
+        `;
+      } else {
+        // 未開放状態 (LOCKED)
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] flex items-center justify-center border transition-all duration-300 border-slate-700 bg-slate-800/60 opacity-75 rounded-sm';
+        el.innerHTML = `
+          <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-slate-600"></div>
+          <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-slate-600"></div>
+          <div class="flex flex-col items-center gap-1 opacity-45">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span class="text-[10px] font-cyber tracking-widest text-slate-400">LOCKED</span>
+          </div>
+        `;
+      }
+    }
+
+    // ===================================================================
+    // 抽選アニメーション 1: 通常行ルーレット（未確定生徒のみを表示）
+    // ===================================================================
+    function revealSeatsWithRoulette(indices) {
+      const validIndices = indices.filter(idx => seats[idx] !== null);
+      if (validIndices.length === 0) {
+        skipEmptyPhasesIfNeeded();
+        updateButtonText();
+        return;
+      }
+
+      isAnimating = true;
+      updateButtonText();
+
+      // この時点でまだ確定していない生徒のプールを取得
+      let pool = getUnrevealedPool();
+      if (pool.length === 0) {
+        pool = seats.filter(s => s !== null);
+      }
+
+      let delay = 40;
+      let elapsed = 0;
+      let tickStep = 0;
+      const slowDownStart = 950;
+      const maxDelay = 340;
+
+      validIndices.forEach(idx => {
+        revealed[idx] = 'roulette';
+      });
+
+      const spin = () => {
+        if (delay >= maxDelay) {
+          validIndices.forEach(idx => {
+            revealed[idx] = true;
+            updateSeatDOM(idx, document.getElementById(`seat-${idx}`));
+          });
+          sfx.playRowWin();
+          isAnimating = false;
+          skipEmptyPhasesIfNeeded();
+          updateButtonText();
+          return;
+        }
+
+        const shuffledPool = shuffledCopy(pool);
+        validIndices.forEach((idx, i) => {
+          const el = document.getElementById(`seat-${idx}`);
+          if (el) {
+            const candidate = shuffledPool[i % shuffledPool.length];
+            updateSeatDOM(idx, el, candidate);
+          }
+        });
+
+        sfx.playTick(tickStep++);
+
+        if (elapsed > slowDownStart) {
+          delay = Math.min(delay * 1.28, maxDelay);
+        }
+
+        elapsed += delay;
+        setTimeout(spin, Math.floor(delay));
+      };
+
+      spin();
+    }
+
+    // ===================================================================
+    // 抽選アニメーション 2: 最前列両端のゆっくり縦スライド（5人目で確定）
+    // そこまでに出ていない生徒の氏名を順に移して5人目でピタッと止める
+    // ===================================================================
+    function revealSlideSeats(indices) {
+      const validIndices = indices.filter(idx => seats[idx] !== null);
+      if (validIndices.length === 0) {
+        skipEmptyPhasesIfNeeded();
+        updateButtonText();
+        return;
+      }
+
+      isAnimating = true;
+      updateButtonText();
+
+      // 最前列フォーカスモード開始（他の行を消して4人だけを大きく中央表示）
+      const seatScreen = document.getElementById('seat-screen');
+      const enteringFocus = !seatScreen.classList.contains('focus-mode');
+      seatScreen.classList.add('focus-mode');
+      sfx.playNext();
+
+      // ズームアニメーションが落ち着いてからスライド開始
+      const startWait = enteringFocus ? 750 : 150;
+
+      setTimeout(() => {
+        const allValidStudents = seats.filter(s => s !== null);
+        const reelControllers = [];
+
+        validIndices.forEach(idx => {
+          const el = document.getElementById(`seat-${idx}`);
+          if (!el) return;
+
+          const trueStudent = seats[idx];
+          const itemH = el.clientHeight || 80;
+
+          // まだ出ていない生徒から本人を除いた候補を取得
+          let candidates = shuffledCopy(getUnrevealedPool([trueStudent.number]));
+          if (candidates.length < 4) {
+            const extras = shuffledCopy(allValidStudents.filter(s => s.number !== trueStudent.number));
+            candidates = [...candidates, ...extras];
+          }
+          if (candidates.length === 0) {
+            candidates = [trueStudent];
+          }
+
+          // 1〜4人目は未出のダミー生徒、5人目(index 4)が本命の生徒
+          const reelList = [
+            candidates[0 % candidates.length],
+            candidates[1 % candidates.length],
+            candidates[2 % candidates.length],
+            candidates[3 % candidates.length],
+            trueStudent
+          ];
+
+          el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] border-2 border-amber-400 bg-slate-900/95 shadow-[0_0_25px_rgba(251,191,36,0.5)] overflow-hidden rounded-sm';
+          const itemsHTML = reelList.map(st => `
+            <div style="height:${itemH}px; min-height:${itemH}px;" class="w-full flex items-center justify-center px-2 text-center font-bold text-sm md:text-base text-amber-100 tracking-wider leading-tight">
+              ${escapeHTML(getStudentName(st))}
+            </div>
+          `).join('');
+
+          el.innerHTML = `
+            <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-amber-300 z-20"></div>
+            <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-amber-300 z-20"></div>
+            <div class="reel-strip w-full flex flex-col will-change-transform" style="transform: translateY(0px);">
+              ${itemsHTML}
+            </div>
+          `;
+
+          const strip = el.querySelector('.reel-strip');
+          reelControllers.push({ idx, el, strip, itemH });
+        });
+
+        // 1人目を表示したあと、2人目→3人目→4人目→5人目へと順番にゆっくりスライド
+        sfx.playSlideStep(0);
+        let step = 1;
+
+        const slideNext = () => {
+          if (step <= 4) {
+            reelControllers.forEach(({ strip, itemH }) => {
+              strip.style.transition = 'transform 0.52s cubic-bezier(0.22, 1, 0.36, 1)';
+              strip.style.transform = `translateY(-${step * itemH}px)`;
+            });
+            sfx.playSlideStep(step);
+            step++;
+            setTimeout(slideNext, 720);
+          } else {
+            // 5人目でピタッと確定！
+            setTimeout(() => {
+              reelControllers.forEach(({ idx, el }) => {
+                revealed[idx] = true;
+                updateSeatDOM(idx, el);
+              });
+              sfx.playRowWin();
+              isAnimating = false;
+              skipEmptyPhasesIfNeeded();
+              updateButtonText();
+            }, 250);
+          }
+        };
+
+        setTimeout(slideNext, 720);
+      }, startWait);
+    }
+
+    // ===================================================================
+    // 抽選アニメーション 3: 教卓右前＆教卓前の極限タメ演出（チラ見せ）
+    // 高速→減速→一度停止→半分次の氏名を見せる→
+    //   pattern 'A': そのまま次の生徒に進んで止まる
+    //   pattern 'B': 2人前の生徒に巻き戻って止まる
+    // ===================================================================
+    function revealBossSeat(idx, pattern) {
+      if (seats[idx] === null) {
+        skipEmptyPhasesIfNeeded();
+        updateButtonText();
+        return;
+      }
+
+      isAnimating = true;
+      updateButtonText();
+
+      const seatScreen = document.getElementById('seat-screen');
+      const enteringFocus = !seatScreen.classList.contains('focus-mode');
+      seatScreen.classList.add('focus-mode');
+
+      const startWait = enteringFocus ? 700 : 100;
+
+      setTimeout(() => {
+        const el = document.getElementById(`seat-${idx}`);
+        if (!el) {
+          isAnimating = false;
+          updateButtonText();
+          return;
+        }
+
+        const trueStudent = seats[idx];
+        const itemH = el.clientHeight || 80;
+        const allValidStudents = seats.filter(s => s !== null);
+
+        // 未確定の生徒から本人を除いたダミー候補を作成
+        let dummyPool = shuffledCopy(getUnrevealedPool([trueStudent.number]));
+        if (dummyPool.length < 4) {
+          const fallback = shuffledCopy(allValidStudents.filter(s => s.number !== trueStudent.number));
+          fallback.forEach(s => {
+            if (!dummyPool.some(d => d.number === s.number)) {
+              dummyPool.push(s);
+            }
+          });
+        }
+        if (dummyPool.length === 0) {
+          dummyPool = [trueStudent];
+        }
+
+        // 全16コマのリールを作成（stopIdx = 14 で一旦停止、15 がチラ見えする次の生徒）
+        const stopIdx = 14;
+        const totalItems = 16;
+        const stripList = [];
+        for (let i = 0; i < totalItems; i++) {
+          stripList.push(dummyPool[i % dummyPool.length]);
+        }
+
+        if (pattern === 'A') {
+          // パターンA: 半分見えた次の生徒(stopIdx + 1)にそのまま進んで確定
+          stripList[stopIdx] = dummyPool[0 % dummyPool.length];
+          stripList[stopIdx + 1] = trueStudent;
+        } else {
+          // パターンB: 半分見せたあと、2人前(stopIdx - 2)に巻き戻って確定
+          stripList[stopIdx - 2] = trueStudent;
+          stripList[stopIdx - 1] = dummyPool[0 % dummyPool.length];
+          stripList[stopIdx]     = dummyPool[1 % dummyPool.length];
+          stripList[stopIdx + 1] = dummyPool[2 % dummyPool.length];
+        }
+
+        el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] border-2 border-yellow-400 bg-slate-900/95 shadow-[0_0_25px_rgba(234,179,8,0.6)] overflow-hidden rounded-sm z-20';
+        const itemsHTML = stripList.map(st => `
+          <div style="height:${itemH}px; min-height:${itemH}px;" class="w-full flex items-center justify-center px-2 text-center font-bold text-sm md:text-base text-white tracking-wider leading-tight">
+            ${escapeHTML(getStudentName(st))}
+          </div>
+        `).join('');
+
+        el.innerHTML = `
+          <div class="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-yellow-300 z-20"></div>
+          <div class="absolute bottom-0 right-0 w-2.5 h-2.5 border-b-2 border-r-2 border-yellow-300 z-20"></div>
+          <div class="reel-strip w-full flex flex-col will-change-transform" style="transform: translateY(0px);">
+            ${itemsHTML}
+          </div>
+        `;
+
+        const strip = el.querySelector('.reel-strip');
+
+        // 14ステップ分のディレイ配列（最初は高速シャッフル、後半は徐々にゆっくり）
+        const stepDelays = [55, 55, 60, 65, 75, 90, 110, 140, 180, 230, 300, 390, 500, 640];
+        let currentStep = 0;
+
+        const runSpinStep = () => {
+          if (currentStep < stopIdx) {
+            const d = stepDelays[currentStep] || 400;
+            currentStep++;
+            const transMs = Math.min(Math.floor(d * 0.85), 420);
+            strip.style.transition = `transform ${transMs}ms cubic-bezier(0.25, 1, 0.5, 1)`;
+            strip.style.transform = `translateY(-${currentStep * itemH}px)`;
+            sfx.playTick(currentStep);
+            setTimeout(runSpinStep, d);
+          } else {
+            // 1. 一旦ストップ！（決まったと思わせる間）
+            el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] border-2 border-amber-400 bg-amber-950/60 shadow-[0_0_28px_rgba(245,158,11,0.85)] overflow-hidden rounded-sm z-20';
+            sfx.playFakeStop();
+
+            setTimeout(() => {
+              // 2. じわっと半分だけズレて、次の生徒が半分チラ見えする！
+              el.className = 'relative w-[90px] h-[70px] md:w-[125px] md:h-[80px] border-2 border-red-500 bg-red-950/60 shadow-[0_0_32px_rgba(239,68,68,0.95)] overflow-hidden rounded-sm z-20';
+              sfx.playSuspense();
+              strip.style.transition = 'transform 0.95s cubic-bezier(0.4, 0, 0.2, 1)';
+              strip.style.transform = `translateY(-${(stopIdx + 0.5) * itemH}px)`;
+
+              // 半分見えた状態でドキドキのタメ
+              setTimeout(() => {
+                if (pattern === 'A') {
+                  // パターンA: そのまま次の生徒にストンと落ちて確定！
+                  sfx.playAdvance();
+                  strip.style.transition = 'transform 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+                  strip.style.transform = `translateY(-${(stopIdx + 1) * itemH}px)`;
+
+                  setTimeout(() => {
+                    revealed[idx] = 'boss';
+                    updateSeatDOM(idx, el);
+                    sfx.playBossWin();
+                    isAnimating = false;
+                    skipEmptyPhasesIfNeeded();
+                    updateButtonText();
+                  }, 520);
+                } else {
+                  // パターンB: ギュイーンと2人前の生徒まで巻き戻って確定！
+                  sfx.playRewind();
+                  strip.style.transition = 'transform 0.85s cubic-bezier(0.22, 1, 0.36, 1)';
+                  strip.style.transform = `translateY(-${(stopIdx - 2) * itemH}px)`;
+
+                  setTimeout(() => {
+                    revealed[idx] = 'boss';
+                    updateSeatDOM(idx, el);
+                    sfx.playBossWin();
+                    isAnimating = false;
+                    skipEmptyPhasesIfNeeded();
+                    updateButtonText();
+                  }, 920);
+                }
+              }, 1250);
+            }, 1150);
+          }
+        };
+
+        runSpinStep();
+      }, startWait);
+    }
+
+    // ===================================================================
+    // コントロールパネル・ボタン制御
+    // ===================================================================
+    function updateButtonText() {
+      const btn = document.getElementById('next-btn');
+      const textSpan = document.getElementById('next-btn-text');
+      const decTl = document.getElementById('btn-dec-tl');
+      const decBr = document.getElementById('btn-dec-br');
+      const printBtn = document.getElementById('print-btn');
+      const toggleSideBtn = document.getElementById('toggle-side-btn');
+
+      let btnClasses = 'relative px-8 py-4 border-2 font-bold tracking-[0.15em] font-cyber transition-all duration-300 uppercase rounded-sm';
+
+      if (isAnimating) {
+        textSpan.innerText = 'PROCESSING...';
+        btn.disabled = true;
+        btnClasses += ' opacity-40 cursor-not-allowed grayscale border-cyan-500 text-cyan-400';
+      } else {
+        btn.disabled = false;
+        btnClasses += ' hover:-translate-y-1 active:translate-y-0 active:scale-95';
+      }
+
+      if (phase === 9) {
+        printBtn.classList.remove('hidden');
+        if (isNumberOrderMode) {
+          toggleSideBtn.classList.remove('hidden');
+        } else {
+          toggleSideBtn.classList.add('hidden');
+        }
+        btnClasses += ' border-pink-500 text-pink-400 hover:bg-pink-950 hover:shadow-[0_0_20px_rgba(255,0,243,0.4)]';
+        decTl.className = 'absolute top-0 left-0 w-2 h-2 bg-pink-500';
+        decBr.className = 'absolute bottom-0 right-0 w-2 h-2 bg-pink-500';
+      } else {
+        printBtn.classList.add('hidden');
+        toggleSideBtn.classList.add('hidden');
+        btnClasses += ' border-cyan-500 text-cyan-400 hover:bg-cyan-950 hover:shadow-[0_0_20px_rgba(0,243,255,0.4)]';
+        decTl.className = 'absolute top-0 left-0 w-2 h-2 bg-cyan-500';
+        decBr.className = 'absolute bottom-0 right-0 w-2 h-2 bg-cyan-500';
+      }
+
+      btn.className = btnClasses;
+
+      if (!isAnimating) {
+        switch (phase) {
+          case 1: textSpan.innerText = 'Seq 1: 第5行 アクセス開始'; break;
+          case 2: textSpan.innerText = 'Seq 2: 第4行 ロック解除'; break;
+          case 3: textSpan.innerText = 'Seq 3: 第3行 ロック解除'; break;
+          case 4: textSpan.innerText = 'Seq 4: 第2行 ロック解除'; break;
+          case 5: textSpan.innerText = 'Seq 5-1: 最前列 両端スライド'; break;
+          case 6: textSpan.innerText = 'Seq 5-2: 教卓右前 オープン'; break;
+          case 7: textSpan.innerText = 'Seq 5-3: 教卓前 クライマックス'; break;
+          case 8: textSpan.innerText = 'Final: 最後列(第6行) 一斉オープン'; break;
+          case 9: textSpan.innerText = 'System Restart (入力へ戻る)'; break;
+        }
+      }
+    }
+
+    // フェーズ進行ボタンのイベント
+    document.getElementById('next-btn').addEventListener('click', async () => {
+      if (isAnimating) return;
+      await sfx.init();
+
+      if (phase === 1) {
+        phase = 2;
+        revealSeatsWithRoulette([25, 26, 27, 28, 29, 30, 31]);
+      } else if (phase === 2) {
+        phase = 3;
+        revealSeatsWithRoulette([18, 19, 20, 21, 22, 23, 24]);
+      } else if (phase === 3) {
+        phase = 4;
+        revealSeatsWithRoulette([11, 12, 13, 14, 15, 16, 17]);
+      } else if (phase === 4) {
+        phase = 5;
+        revealSeatsWithRoulette([4, 5, 6, 7, 8, 9, 10]);
+      } else if (phase === 5) {
+        phase = 6;
+        revealSlideSeats([0, 3]);
+      } else if (phase === 6) {
+        phase = 7;
+        revealBossSeat(2, bossPattern1);
+      } else if (phase === 7) {
+        phase = 8;
+        revealBossSeat(1, bossPattern2);
+      } else if (phase === 8) {
+        // フォーカスモードを解除して全体表示に戻し、6行目をまとめてオープン
+        document.getElementById('seat-screen').classList.remove('focus-mode');
+        phase = 9;
+        revealSeatsWithRoulette([32, 33, 34, 35, 36, 37]);
+      } else if (phase === 9) {
+        showModal('最初の入力画面に戻りますか？', true, () => {
+          document.getElementById('seat-screen').classList.remove('focus-mode');
+          phase = 0;
+          updateView();
+        });
+      }
+    });
+
+    // 出席番号順モード時の「廊下側（左右）」切り替えボタン
+    document.getElementById('toggle-side-btn').addEventListener('click', async () => {
+      await sfx.playNext();
+      corridorSide = corridorSide === 'right' ? 'left' : 'right';
+      const toggleText = document.getElementById('toggle-side-text');
+      toggleText.innerText = corridorSide === 'right'
+        ? '⇄ 廊下側：右列(4席)から'
+        : '⇄ 廊下側：左列(5席)から';
+      applyNumberOrder();
+      generateSeats();
+    });
+
+    // ===================================================================
+    // 印刷処理（フリガナ・出席番号対応 / 教卓が下の教師視点A4横レイアウト）
+    // ===================================================================
+    document.getElementById('print-btn').addEventListener('click', () => {
+      const printGrid = document.getElementById('print-seating-grid');
+      printGrid.innerHTML = '';
+      syncPrintSideLabels();
+
+      // 1. 現在の座席データから元のレイアウトと同じ6×7の2次元配列を作成
+      const seatingData2D = seatLayout.map(row =>
+        row.map(idx => (idx !== null ? seats[idx] : null))
+      );
+
+      // 2. 教卓を下に配置するため、前後・左右を180度反転させる
+      const teacherViewData = [...seatingData2D]
+        .reverse()
+        .map(row => [...row].reverse());
+
+      // 3. 印刷用カードを生成
+      teacherViewData.forEach(row => {
+        row.forEach(student => {
+          const seatDiv = document.createElement('div');
+
+          if (!student) {
+            seatDiv.className = 'print-seat-empty';
+          } else {
+            seatDiv.className = 'print-seat';
+
+            const nameParts = student.name.split(/[\s　]+/).filter(Boolean);
+            const kanaParts = (student.furigana || '').split(/[\s　]+/).filter(Boolean);
+            const numHTML = `<span style="position:absolute; top:3px; left:6px; font-size:9.5pt; font-weight:700; color:#4b5563;">${escapeHTML(student.number)}</span>`;
+
+            let bodyHTML = '';
+            if (nameParts.length >= 2 && kanaParts.length >= 2) {
+              const lastName = escapeHTML(nameParts[0]);
+              const firstName = escapeHTML(nameParts.slice(1).join(' '));
+              const lastKana = escapeHTML(kanaParts[0]);
+              const firstKana = escapeHTML(kanaParts.slice(1).join(' '));
+              bodyHTML = `
+                <div style="line-height:1.1;">
+                  <span style="display:block; font-size:7pt; font-weight:500; color:#6b7280;">${lastKana}</span>
+                  <span style="display:block; font-size:12.5pt; font-weight:700; color:#111827;">${lastName}</span>
+                </div>
+                <div style="line-height:1.1; margin-top:2px;">
+                  <span style="display:block; font-size:7pt; font-weight:500; color:#6b7280;">${firstKana}</span>
+                  <span style="display:block; font-size:12.5pt; font-weight:700; color:#111827;">${firstName}</span>
+                </div>
+              `;
+            } else if (nameParts.length >= 2) {
+              const lastName = escapeHTML(nameParts[0]);
+              const firstName = escapeHTML(nameParts.slice(1).join(' '));
+              const fullKana = escapeHTML(student.furigana || '');
+              bodyHTML = `
+                ${fullKana ? `<span style="display:block; font-size:7pt; font-weight:500; color:#6b7280; line-height:1.1; margin-bottom:1px;">${fullKana}</span>` : ''}
+                <span style="display:block; font-size:12.5pt; font-weight:700; color:#111827; line-height:1.2;">${lastName}</span>
+                <span style="display:block; font-size:12.5pt; font-weight:700; color:#111827; line-height:1.2;">${firstName}</span>
+              `;
+            } else {
+              const fullName = escapeHTML(student.name);
+              const fullKana = escapeHTML(student.furigana || '');
+              bodyHTML = `
+                ${fullKana ? `<span style="display:block; font-size:7pt; font-weight:500; color:#6b7280; line-height:1.1; margin-bottom:2px;">${fullKana}</span>` : ''}
+                <span style="display:block; font-size:13pt; font-weight:700; color:#111827; line-height:1.2;">${fullName}</span>
+              `;
+            }
+
+            seatDiv.innerHTML = numHTML + bodyHTML;
+          }
+
+          printGrid.appendChild(seatDiv);
+        });
+      });
+
+      // DOM描画を確実に反映させてから印刷ダイアログを開く
+      setTimeout(() => {
+        window.print();
+      }, 150);
+    });
+  </script>
+</body>
+</html>
